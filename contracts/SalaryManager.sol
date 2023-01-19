@@ -16,6 +16,12 @@ import "hardhat/console.sol";
 contract SalaryManager is ReentrancyGuard {
     using BokkyPooBahsDateTimeLibrary for uint256;
 
+    struct Date {
+        uint256 year;
+        uint256 month;
+        uint256 day;
+    }
+
     address public master;
     address public slave;
     address public token;
@@ -27,7 +33,11 @@ contract SalaryManager is ReentrancyGuard {
     uint256 public salary;
 
     uint256 public payDay;
-    
+
+    Date public lastPayedDate;
+
+    uint256 proposalId;
+
     constructor(uint256 _salary, uint256 _payDay) {
         slave = msg.sender;
         salary = _salary * 1 ether;
@@ -36,27 +46,52 @@ contract SalaryManager is ReentrancyGuard {
         }
         payDay = _payDay;
 
-        block.timestamp.timestampToDateTime();
+        (uint256 year, uint256 month, uint256 day) = block
+            .timestamp
+            .timestampToDate();
+        console.log("year: %s, month: %s, day: %s", year, month, day);
     }
 
-    function updateToken(address _token) public onlyMaster {
+    function getPaid() public onlySlave {
+        Date memory today = currentDate();
+
+        if (today.month > lastPayedDate.month && today.day >= payDay) {
+            lastPayedDate = today;
+            uint256 balance = IERC20(token).balanceOf(address(this));
+            if (balance >= salary) {
+                IERC20(token).transfer(msg.sender, salary);
+            } else {
+                revert NotEnoughFund();
+            }
+        }
+    }
+
+    function updateToken(address _token) public notZeroAddress(_token) {
+        // require both signatures
         token = _token;
         tokenDecimals = IERC20Metadata(token).decimals();
     }
 
-    function promote(uint256 _newSalary) public onlySlave {
+    function requestPromotion() external pure {}
+
+    function promote(uint256 _newSalary) public onlyMaster {
+        assert(_newSalary > salary);
         salary = _newSalary;
     }
+
+    function requestDemotion() external pure {}
 
     function demote(uint256 _newSalary) public onlySlave {
         // require slave approve
+        assert(_newSalary < salary);
         salary = _newSalary;
     }
 
-    function getPaid() public onlySlave {
-        // uint256 nextPayday = lastPayday + 30 days;
-        // lastPayday = nextPayday;
-        IERC20(token).transfer(msg.sender, salary);
+    function currentDate() public view returns (Date memory today) {
+        (uint256 year, uint256 month, uint256 day) = block
+            .timestamp
+            .timestampToDate();
+        return Date(year, month, day);
     }
 
     modifier onlyMaster() {
